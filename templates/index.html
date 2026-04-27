@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OsintSpectre — Reconnaissance Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>OsintSpectre</h1>
+            <p class="subtitle">Reconnaissance Engine v3.0</p>
+            <div class="nav-links">
+                <a href="#" class="active">Dashboard</a>
+                <a href="#" onclick="return false;">History</a>
+                <a href="#" onclick="return false;">Export</a>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="api-status" id="apiStatus">
+                    <h3>API Status</h3>
+                    <div class="status-item"><span class="dot" id="dotShodan"></span> Shodan</div>
+                    <div class="status-item"><span class="dot" id="dotHunter"></span> Hunter.io</div>
+                    <div class="status-item"><span class="dot" id="dotDehashed"></span> Dehashed</div>
+                </div>
+
+                <div class="query-types">
+                    <h3>Query Types</h3>
+                    <div class="type-badges">
+                        <span class="badge active" data-type="email">Email</span>
+                        <span class="badge" data-type="username">Username</span>
+                        <span class="badge" data-type="phone">Phone</span>
+                        <span class="badge" data-type="domain">Domain</span>
+                        <span class="badge" data-type="ip">IP</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="work-area">
+                <h2>OSINT Reconnaissance</h2>
+
+                <div class="status-bar" id="statusBar">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span id="statusText">Ready</span>
+                    <span class="progress-bar" id="progressBar" style="display:none;">
+                        <span class="progress-fill" id="progressFill"></span>
+                    </span>
+                </div>
+
+                <div class="input-area">
+                    <div class="input-row">
+                        <span class="query-type-label" id="queryTypeLabel">Email</span>
+                        <input type="text" id="targetInput" placeholder="Enter a target to begin reconnaissance">
+                        <button id="searchBtn" onclick="startLookup()">Search</button>
+                    </div>
+                </div>
+
+                <div class="results-area" id="resultsArea">
+                    <div class="placeholder">
+                        <div class="placeholder-icon">&#128270;</div>
+                        <p>Results will appear here with full intelligence data</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTaskId = null;
+        let currentType = 'email';
+
+        // ─── Query type selector ──────────────────────────────────────────
+        document.querySelectorAll('.badge').forEach(badge => {
+            badge.addEventListener('click', function() {
+                document.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentType = this.dataset.type;
+                document.getElementById('queryTypeLabel').textContent =
+                    this.dataset.type.charAt(0).toUpperCase() + this.dataset.type.slice(1);
+                document.getElementById('targetInput').placeholder =
+                    `Enter ${this.dataset.type} to investigate...`;
+            });
+        });
+
+        // ─── Check API status on load ─────────────────────────────────────
+        fetch('/api/config')
+            .then(r => r.json())
+            .then(config => {
+                document.getElementById('dotShodan').className = 'dot ' + (config.shodan ? 'green' : 'red');
+                document.getElementById('dotHunter').className = 'dot ' + (config.hunter ? 'green' : 'red');
+                document.getElementById('dotDehashed').className = 'dot ' + (config.dehashed ? 'green' : 'red');
+            });
+
+        // ─── Start Lookup ─────────────────────────────────────────────────
+        function startLookup() {
+            const target = document.getElementById('targetInput').value.trim();
+            if (!target) return;
+
+            const statusText = document.getElementById('statusText');
+            const indicator = document.getElementById('statusIndicator');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            const resultsArea = document.getElementById('resultsArea');
+            const btn = document.getElementById('searchBtn');
+
+            btn.disabled = true;
+            btn.textContent = 'Scanning...';
+            statusText.textContent = 'Running reconnaissance...';
+            indicator.className = 'status-indicator running';
+            progressBar.style.display = 'block';
+            progressFill.style.width = '0%';
+            resultsArea.innerHTML = '<div class="placeholder"><p>Gathering intelligence...</p></div>';
+
+            fetch('/api/lookup', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({type: currentType, target: target})
+            })
+            .then(r => r.json())
+            .then(data => {
+                currentTaskId = data.task_id;
+                pollTask(data.task_id);
+            })
+            .catch(err => {
+                statusText.textContent = 'Error starting task';
+                indicator.className = 'status-indicator error';
+                btn.disabled = false;
+                btn.textContent = 'Search';
+            });
+        }
+
+        // ─── Poll task status ─────────────────────────────────────────────
+        function pollTask(taskId) {
+            const interval = setInterval(() => {
+                fetch(`/api/status/${taskId}`)
+                    .then(r => r.json())
+                    .then(task => {
+                        const progressFill = document.getElementById('progressFill');
+                        const statusText = document.getElementById('statusText');
+                        const indicator = document.getElementById('statusIndicator');
+                        const btn = document.getElementById('searchBtn');
+
+                        if (task.progress) {
+                            progressFill.style.width = task.progress + '%';
+                        }
+
+                        if (task.status === 'complete') {
+                            clearInterval(interval);
+                            displayResults(task.results);
+                            statusText.textContent = 'Complete';
+                            indicator.className = 'status-indicator complete';
+                            btn.disabled = false;
+                            btn.textContent = 'Search';
+                        } else if (task.status === 'error') {
+                            clearInterval(interval);
+                            document.getElementById('resultsArea').innerHTML =
+                                `<div class="error-box"><h3>Error</h3><p>${task.error || 'Unknown error'}</p></div>`;
+                            statusText.textContent = 'Error';
+                            indicator.className = 'status-indicator error';
+                            btn.disabled = false;
+                            btn.textContent = 'Search';
+                        }
+                    });
+            }, 1000);
+        }
+
+        // ─── Display Results ──────────────────────────────────────────────
+        function displayResults(results) {
+            const area = document.getElementById('resultsArea');
+            area.innerHTML = '';
+
+            if (Object.keys(results).length === 0) {
+                area.innerHTML = '<div class="placeholder"><p>No results found</p></div>';
+                return;
+            }
+
+            for (const [source, data] of Object.entries(results)) {
+                if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) continue;
+
+                const card = document.createElement('div');
+                card.className = 'result-card';
+
+                const header = document.createElement('div');
+                header.className = 'card-header';
+                header.textContent = source.replace('_', ' ').toUpperCase();
+                header.onclick = () => {
+                    const body = card.querySelector('.card-body');
+                    body.style.display = body.style.display === 'none' ? 'block' : 'none';
+                };
+                card.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'card-body';
+
+                if (typeof data === 'string') {
+                    body.innerHTML = `<pre>${escapeHtml(data)}</pre>`;
+                } else if (Array.isArray(data)) {
+                    if (data.length > 0 && typeof data[0] === 'object') {
+                        const table = document.createElement('table');
+                        table.className = 'data-table';
+                        const thead = document.createElement('thead');
+                        const tr = document.createElement('tr');
+                        for (const key of Object.keys(data[0])) {
+                            const th = document.createElement('th');
+                            th.textContent = key;
+                            tr.appendChild(th);
+                        }
+                        thead.appendChild(tr);
+                        table.appendChild(thead);
+                        const tbody = document.createElement('tbody');
+                        for (const item of data) {
+                            const tr2 = document.createElement('tr');
+                            for (const val of Object.values(item)) {
+                                const td = document.createElement('td');
+                                td.textContent = typeof val === 'string' ? val.slice(0, 80) : JSON.stringify(val).slice(0, 80);
+                                tr2.appendChild(td);
+                            }
+                            tbody.appendChild(tr2);
+                        }
+                        table.appendChild(tbody);
+                        body.appendChild(table);
+                    } else {
+                        const ul = document.createElement('ul');
+                        for (const item of data) {
+                            const li = document.createElement('li');
+                            if (typeof item === 'object' && item.url) {
+                                li.innerHTML = `<a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.site || item.url)}</a> <span class="status-tag ${item.status || ''}">${item.status || ''}</span>`;
+                            } else {
+                                li.textContent = typeof item === 'string' ? item : JSON.stringify(item);
+                            }
+                            ul.appendChild(li);
+                        }
+                        body.appendChild(ul);
+                    }
+                } else if (typeof data === 'object') {
+                    const table = document.createElement('table');
+                    table.className = 'data-table';
+                    for (const [key, val] of Object.entries(data)) {
+                        if (val === null || val === undefined || (Array.isArray(val) && val.length === 0)) continue;
+                        const tr = document.createElement('tr');
+                        const tdKey = document.createElement('td');
+                        tdKey.className = 'key-col';
+                        tdKey.textContent = key;
+                        const tdVal = document.createElement('td');
+                        if (Array.isArray(val)) {
+                            tdVal.textContent = val.join(', ');
+                        } else if (typeof val === 'object') {
+                            tdVal.textContent = JSON.stringify(val);
+                        } else {
+                            tdVal.textContent = String(val);
+                        }
+                        tr.appendChild(tdKey);
+                        tr.appendChild(tdVal);
+                        table.appendChild(tr);
+                    }
+                    body.appendChild(table);
+                }
+
+                card.appendChild(body);
+                area.appendChild(card);
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ─── Enter key to search ──────────────────────────────────────────
+        document.getElementById('targetInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') startLookup();
+        });
+    </script>
+</body>
+</html>
