@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: osint-spectre
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: FLASK_DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SHODAN_API_KEY
+        sync: false
+      - key: HUNTER_API_KEY
+        sync: false
+      - key: DEHASHED_EMAIL
+        sync: false
+      - key: DEHASHED_API_KEY
+        sync: false
