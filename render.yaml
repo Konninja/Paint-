@@ -3,12 +3,13 @@ services:
     name: osint-spectre
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 2 --threads 4 --timeout 120
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /api/health
     envVars:
       - key: FLASK_DEBUG
         value: "False"
-      - key: SECRET_KEY
-        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.12.8"
       - key: SHODAN_API_KEY
         sync: false
       - key: HUNTER_API_KEY
@@ -16,4 +17,6 @@ services:
       - key: DEHASHED_EMAIL
         sync: false
       - key: DEHASHED_API_KEY
+        sync: false
+      - key: VIRUSTOTAL_API_KEY
         sync: false
