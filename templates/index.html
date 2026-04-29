@@ -3,81 +3,894 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OsintSpectre — Reconnaissance Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>OsintSpectre v3.0 — Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0e1a;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2235;
+            --border-color: #1e293b;
+            --accent: #00d4ff;
+            --accent2: #7c3aed;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        /* Animated grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image:
+                linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .container-fluid { position: relative; z-index: 1; }
+
+        /* Navbar */
+        .navbar {
+            background: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .navbar-brand {
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 1.5rem;
+        }
+        .navbar-brand small {
+            -webkit-text-fill-color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 0.7rem;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            border-color: rgba(0, 212, 255, 0.2);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
+        }
+        .card-header {
+            background: transparent;
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card-body { padding: 1.25rem; }
+
+        /* Stat cards */
+        .stat-card {
+            background: linear-gradient(145deg, var(--bg-card), #0f1729);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: all 0.3s;
+        }
+        .stat-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 212, 255, 0.08);
+        }
+        .stat-icon {
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        /* Tabs */
+        .nav-tabs .nav-link {
+            color: var(--text-secondary);
+            border: none;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px 8px 0 0;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .nav-tabs .nav-link:hover {
+            color: var(--text-primary);
+            background: rgba(0, 212, 255, 0.05);
+        }
+        .nav-tabs .nav-link.active {
+            color: var(--accent);
+            background: transparent;
+            border-bottom: 2px solid var(--accent);
+        }
+
+        /* Input */
+        .input-group {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        .input-group:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+        }
+        .input-group input {
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            padding: 0.85rem 1rem;
+            font-size: 1rem;
+        }
+        .input-group input:focus { box-shadow: none; background: transparent; color: var(--text-primary); }
+        .input-group input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+        .input-group .btn {
+            border: none;
+            padding: 0.85rem 1.5rem;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent2), #5b21b6);
+            color: white;
+        }
+        .btn-primary:hover { background: linear-gradient(135deg, #7c3aed, #4c1d95); color: white; }
+
+        /* API status badges */
+        .api-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.7rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+        }
+        .api-badge .dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .dot.offline { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+        /* Progress bar */
+        .progress {
+            background: var(--border-color);
+            height: 4px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            transition: width 0.5s ease;
+        }
+
+        /* Results section */
+        #resultContainer { display: none; }
+        #resultContainer.visible { display: block; }
+
+        /* Result items */
+        .result-section {
+            margin-bottom: 1.5rem;
+        }
+        .result-section h5 {
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .result-item {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .result-item .label { color: var(--text-secondary); font-size: 0.85rem; }
+        .result-item .value { color: var(--text-primary); font-weight: 500; word-break: break-all; }
+        .data-table {
+            font-size: 0.9rem;
+        }
+        .data-table th { color: var(--text-secondary); font-weight: 500; border-color: var(--border-color); }
+        .data-table td { color: var(--text-primary); border-color: var(--border-color); }
+
+        /* Collapsible */
+        .collapse-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+        .collapse-toggle::after {
+            content: '\f282';
+            font-family: 'bootstrap-icons';
+            margin-left: 0.5rem;
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        .collapse-toggle[aria-expanded="true"]::after {
+            transform: rotate(180deg);
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 20px; height: 20px;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.4s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stat-card { padding: 1rem; }
+            .navbar-brand { font-size: 1.2rem; }
+        }
+
+        /* Copy button */
+        .copy-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+        /* Badge colors */
+        .badge-found { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-notfound { background: rgba(148, 163, 184, 0.1); color: var(--text-secondary); border: 1px solid var(--border-color); }
+        .badge-error { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
+
+        /* Loading skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, var(--bg-card) 25%, #1e293b 50%, var(--bg-card) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 6px;
+            height: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>OsintSpectre</h1>
-            <p class="subtitle">Reconnaissance Engine v3.0</p>
-            <div class="nav-links">
-                <a class="active" data-tab="dashboard">Dashboard</a>
-                <a data-tab="history">History</a>
-                <a data-tab="export">Export</a>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark sticky-top px-3">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">
+            <i class="bi bi-eye-fill me-2"></i>OsintSpectre
+            <small>v3.0</small>
+        </a>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-outline-secondary text-secondary border-secondary" onclick="location.reload()">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid py-4">
+    <div class="row g-3">
+
+        <!-- Sidebar / API Status Column -->
+        <div class="col-lg-3">
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-shield-check text-info"></i> API Services
+                </div>
+                <div class="card-body" id="apiStatusList">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="spinner"></span>
+                        <span class="text-secondary small">Loading status...</span>
+                    </div>
+                </div>
             </div>
-        </header>
 
-        <div class="main-content">
-            <aside class="sidebar">
-                <div class="card">
-                    <h3>API Status</h3>
-                    <div id="apiStatus">
-                        <div class="api-item"><span>Shodan</span><span class="api-dot offline" id="dot-shodan"></span></div>
-                        <div class="api-item"><span>Hunter.io</span><span class="api-dot offline" id="dot-hunter"></span></div>
-                        <div class="api-item"><span>Dehashed</span><span class="api-dot offline" id="dot-dehashed"></span></div>
-                        <div class="api-item"><span>VirusTotal</span><span class="api-dot offline" id="dot-virustotal"></span></div>
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-info-circle text-info"></i> Quick Info
+                </div>
+                <div class="card-body small text-secondary">
+                    <p class="mb-1"><i class="bi bi-database"></i> <strong class="text-primary">45+</strong> integrated services</p>
+                    <p class="mb-1"><i class="bi bi-shield"></i> Breach databases:</p>
+                    <div class="ms-3 mb-2">
+                        <span class="api-badge"><span class="dot online"></span> Snusbase</span>
+                        <span class="api-badge"><span class="dot online"></span> LeakCheck</span>
+                        <span class="api-badge"><span class="dot online"></span> Dehashed</span>
+                        <span class="api-badge"><span class="dot online"></span> IntelX</span>
+                    </div>
+                    <p class="mb-0"><i class="bi bi-person-badge"></i> People search: GoLookup, Whitepages, Thatsthem, FastPeopleSearch</p>
+                </div>
+            </div>
+
+            <!-- Query History -->
+            <div class="card mt-3" id="historyCard" style="display:none;">
+                <div class="card-header">
+                    <i class="bi bi-clock-history text-info"></i> Recent Queries
+                </div>
+                <div class="card-body" id="historyList">
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-lg-9">
+
+            <!-- Stats Row -->
+            <div class="row g-2 mb-3">
+                <div class="col-6 col-md-3">
+                    <div class="stat-card text-center">
+                        <div class="stat-icon mx-auto mb-2" style="background: rgba(0,212,255,0.1); color: var(--accent);">
+                            <i class="bi bi-envelope"></i>
+                        </div>
+                        <div class="fs-4 fw-bold text-info" id="statEmail">0</div>
+                        <div class="small text-secondary">Email Lookups</div>
                     </div>
                 </div>
-
-                <div class="card">
-                    <h3>Query Types</h3>
-                    <div class="query-grid">
-                        <button class="query-btn" data-type="email">Email</button>
-                        <button class="query-btn" data-type="username">Username</button>
-                        <button class="query-btn" data-type="phone">Phone</button>
-                        <button class="query-btn" data-type="domain">Domain</button>
-                        <button class="query-btn" data-type="ip">IP</button>
+                <div class="col-6 col-md-3">
+                    <div class="stat-card text-center">
+                        <div class="stat-icon mx-auto mb-2" style="background: rgba(124,58,237,0.1); color: var(--accent2);">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <div class="fs-4 fw-bold" style="color: var(--accent2);" id="statUsername">0</div>
+                        <div class="small text-secondary">Username Searches</div>
                     </div>
                 </div>
+                <div class="col-6 col-md-3">
+                    <div class="stat-card text-center">
+                        <div class="stat-icon mx-auto mb-2" style="background: rgba(16,185,129,0.1); color: var(--success);">
+                            <i class="bi bi-telephone"></i>
+                        </div>
+                        <div class="fs-4 fw-bold text-success" id="statPhone">0</div>
+                        <div class="small text-secondary">Phone Searches</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="stat-card text-center">
+                        <div class="stat-icon mx-auto mb-2" style="background: rgba(245,158,11,0.1); color: var(--warning);">
+                            <i class="bi bi-globe"></i>
+                        </div>
+                        <div class="fs-4 fw-bold text-warning" id="statDomain">0</div>
+                        <div class="small text-secondary">Domain/IP Checks</div>
+                    </div>
+                </div>
+            </div>
 
-                <div class="card" id="historyPanel">
-                    <h3>Recent Queries</h3>
-                    <div class="history-list" id="historyList">
-                        <div style="color:#3a4a6a; font-size:0.85em; text-align:center; padding:20px;">
-                            No queries yet
+            <!-- Search Card -->
+            <div class="card mb-3">
+                <div class="card-body pb-0">
+                    <ul class="nav nav-tabs" id="queryTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="tab" data-type="email">
+                                <i class="bi bi-envelope me-1"></i> Email
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-type="username">
+                                <i class="bi bi-person me-1"></i> Username
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-type="phone">
+                                <i class="bi bi-telephone me-1"></i> Phone
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-type="domain">
+                                <i class="bi bi-globe me-1"></i> Domain
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-type="ip">
+                                <i class="bi bi-hdd-network me-1"></i> IP
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body pt-3">
+                    <div class="input-group">
+                        <input type="text" id="searchInput" class="form-control"
+                               placeholder="Enter email, username, phone, domain, or IP address..."
+                               autocomplete="off" spellcheck="false">
+                        <button class="btn btn-primary px-4" id="searchBtn">
+                            <i class="bi bi-search me-1"></i> Investigate
+                        </button>
+                    </div>
+                    <div class="mt-2">
+                        <small class="text-secondary" id="inputHelp">e.g. user@example.com</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div id="progressContainer" style="display:none;" class="mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span id="progressLabel" class="small text-secondary">Investigating...</span>
+                            <span id="progressPercent" class="small fw-bold text-info">0%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="progressBar" style="width:
+                                <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+                        </div>
+                        <div class="mt-2 text-center">
+                            <small class="text-secondary" id="progressStatus">Initializing...</small>
                         </div>
                     </div>
                 </div>
-            </aside>
+            </div>
 
-            <main class="work-area">
-                <div class="status-bar" id="statusBar" style="display:none;">
-                    <span class="status-indicator" id="statusIndicator"></span>
-                    <span id="statusText">Ready</span>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill" style="width:0%"></div>
-                    </div>
-                </div>
+            <!-- Results -->
+            <div id="resultContainer">
+                <div id="resultContent"></div>
+            </div>
 
-                <div class="input-area">
-                    <div class="input-row">
-                        <span class="query-type-label" id="queryLabel">Email</span>
-                        <input type="text" id="queryInput" placeholder="Enter target...">
-                        <button id="searchBtn">Search</button>
-                    </div>
-                </div>
-
-                <div class="results-area" id="resultsArea">
-                    <div class="placeholder" id="placeholder">
-                        <div class="placeholder-icon">🔎</div>
-                        <p>Results will appear here with full intelligence data</p>
-                    </div>
-                </div>
-            </main>
         </div>
     </div>
- <script src="{{ url_for('static', filename='app.js') }}"></script>
+</div>
+
+<!-- Toast container -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true"
+         style="background: var(--bg-card); border: 1px solid var(--border-color);">
+        <div class="toast-header" style="background: var(--bg-card); color: var(--text-primary); border-bottom: 1px solid var(--border-color);">
+            <i class="bi bi-info-circle me-2 text-info"></i>
+            <strong class="me-auto">OsintSpectre</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body text-secondary" id="toastMessage">
+            Ready
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// OsintSpectre v3.0 — Frontend Engine
+// ═══════════════════════════════════════════════════════════════════
+
+const API_BASE = '';
+const QUERY_TYPES = ['email', 'username', 'phone', 'domain', 'ip'];
+
+let activeType = 'email';
+let currentTaskId = null;
+let progressInterval = null;
+let queryHistory = JSON.parse(localStorage.getItem('osintspectre_history') || '[]');
+let stats = JSON.parse(localStorage.getItem('osintspectre_stats') || '{"email":0,"username":0,"phone":0,"domain":0,"ip":0}');
+
+// ─── Init ─────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    loadApiStatus();
+    updateStats();
+    renderHistory();
+
+    // Tab switching
+    document.querySelectorAll('#queryTabs .nav-link').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', () => {
+            activeType = tab.dataset.type;
+            updateInputHelp();
+            document.getElementById('searchInput').focus();
+        });
+    });
+
+    // Search button
+    document.getElementById('searchBtn').addEventListener('click', startSearch);
+    document.getElementById('searchInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') startSearch();
+    });
+
+    updateInputHelp();
+});
+
+// ─── API Status ───────────────────────────────────────────────────
+async function loadApiStatus() {
+    try {
+        const r = await fetch(`${API_BASE}/api/config`);
+        const data = await r.json();
+        const config = data.config || {};
+        const container = document.getElementById('apiStatusList');
+        container.innerHTML = '';
+
+        const services = [
+            { key: 'SHODAN_API_KEY', name: 'Shodan', icon: 'bi-shield' },
+            { key: 'HUNTER_API_KEY', name: 'Hunter.io', icon: 'bi-search' },
+            { key: 'DEHASHED_API_KEY', name: 'Dehashed', icon: 'bi-database' },
+            { key: 'VIRUSTOTAL_API_KEY', name: 'VirusTotal', icon: 'bi-bug' },
+            { key: 'WHATCMS_API_KEY', name: 'WhatCMS', icon: 'bi-layers' },
+            { key: 'SEON_API_KEY', name: 'SEON', icon: 'bi-person-badge' },
+            { key: 'SNUSBASE_KEY', name: 'Snusbase', icon: 'bi-database' },
+            { key: 'LEAKCHECK_KEY', name: 'LeakCheck', icon: 'bi-database' },
+            { key: 'INTELX_KEY', name: 'IntelX', icon: 'bi-search' },
+            { key: 'INTELVAULT_KEY', name: 'IntelVault', icon: 'bi-shield-check' },
+        ];
+
+        services.forEach(s => {
+            const val = config[s.key];
+            const isConfigured = val && val.length > 3 && val !== 'your_...';
+            const div = document.createElement('div');
+            div.className = 'd-flex align-items-center gap-2 mb-1';
+            div.innerHTML = `
+                <span class="api-badge">
+                    <span class="dot ${isConfigured ? 'online' : 'offline'}"></span>
+                    <i class="${s.icon} me-1"></i> ${s.name}
+                </span>
+            `;
+            container.appendChild(div);
+        });
+    } catch (e) {
+        document.getElementById('apiStatusList').innerHTML =
+            '<div class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Could not load API status</div>';
+    }
+}
+
+// ─── Input Help ───────────────────────────────────────────────────
+function updateInputHelp() {
+    const helps = {
+        email: 'e.g. user@example.com — searches breaches, social media, hunter.io, SEON, thatsthem, and more',
+        username: 'e.g. johndoe — checks 45+ social platforms, breach databases, and public sources',
+        phone: 'e.g. +1-555-123-4567 — parses number, carrier info, caller ID, reverse lookup, breach check',
+        domain: 'e.g. example.com — WHOIS, DNS records, security headers, SSL, VirusTotal, WhatCMS, subdomains',
+        ip: 'e.g. 8.8.8.8 — geolocation, Shodan, VirusTotal, port scan, RDAP, reverse DNS, abuse score',
+    };
+    document.getElementById('inputHelp').textContent = helps[activeType] || '';
+    document.getElementById('searchInput').placeholder =
+        `Enter ${activeType} address...`;
+}
+
+// ─── Search ────────────────────────────────────────────────────────
+function startSearch() {
+    const input = document.getElementById('searchInput').value.trim();
+    if (!input) {
+        showToast('Please enter a valid input', 'warning');
+        return;
+    }
+
+    // Validate based on type
+    let isValid = true;
+    if (activeType === 'email' && !input.includes('@')) isValid = false;
+    else if (activeType === 'phone') {
+        const digits = input.replace(/[^0-9]/g, '');
+        if (digits.length < 7) isValid = false;
+    }
+    else if (activeType === 'domain' && input.includes(' ')) isValid = false;
+    else if (activeType === 'ip' && !/^[\d.]+$/.test(input) && !/^[0-9a-fA-F:]+$/.test(input)) isValid = false;
+
+    if (!isValid) {
+        showToast(`Invalid ${activeType} format`, 'error');
+        return;
+    }
+
+    // Show progress
+    document.getElementById('progressContainer').style.display = 'block';
+    document.getElementById('resultContainer').className = '';
+    document.getElementById('resultContent').innerHTML =
+        '<div class="text-center py-4"><div class="spinner me-2"></div> Starting investigation...</div>';
+
+    // Update stats
+    stats[activeType] = (stats[activeType] || 0) + 1;
+    localStorage.setItem('osintspectre_stats', JSON.stringify(stats));
+    updateStats();
+
+    // Add to history
+    queryHistory.unshift({ type: activeType, query: input, time: new Date().toISOString() });
+    if (queryHistory.length > 20) queryHistory.pop();
+    localStorage.setItem('osintspectre_history', JSON.stringify(queryHistory));
+    renderHistory();
+
+    // Call API
+    fetch(`${API_BASE}/api/lookup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: activeType, query: input })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            showToast(data.error, 'error');
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('resultContent').innerHTML =
+                `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        currentTaskId = data.task_id;
+        startPolling(currentTaskId);
+    })
+    .catch(err => {
+        showToast('Network error: ' + err.message, 'error');
+        document.getElementById('progressContainer').style.display = 'none';
+    });
+}
+
+// ─── Polling ──────────────────────────────────────────────────────
+function startPolling(taskId) {
+    if (progressInterval) clearInterval(progressInterval);
+    progressInterval = setInterval(() => pollStatus(taskId), 800);
+}
+
+function pollStatus(taskId) {
+    fetch(`${API_BASE}/api/status/${taskId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            clearInterval(progressInterval);
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('resultContent').innerHTML =
+                `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+
+        const pct = data.progress || 0;
+        document.getElementById('progressBar').style.width = pct + '%';
+        document.getElementById('progressPercent').textContent = pct + '%';
+        document.getElementById('progressStatus').textContent = data.status || 'Processing...';
+
+        if (data.progress_label) {
+            document.getElementById('progressLabel').textContent = data.progress_label;
+        }
+
+        if (data.complete) {
+            clearInterval(progressInterval);
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('resultContainer').className = 'visible';
+            renderResults(data.results || {});
+            showToast('Investigation complete', 'success');
+        }
+    })
+    .catch(() => {});
+}
+
+// ─── Render Results ──────────────────────────────────────────────
+function renderResults(data) {
+    const container = document.getElementById('resultContent');
+    if (!data || Object.keys(data).length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No results returned</div>';
+        return;
+    }
+
+    let html = '<div class="fade-in">';
+
+    // Summary header
+    const foundCount = data.breach_databases ? Object.keys(data.breach_databases).length : 0;
+    const socialCount = data.social_media ? data.social_media.length : 0;
+    const dataPoints = Object.keys(data).length;
+
+    html += `
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="api-badge"><i class="bi bi-database text-info"></i> ${dataPoints} data fields</span>
+            ${foundCount > 0 ? `<span class="api-badge"><i class="bi bi-exclamation-triangle text-danger"></i> ${foundCount} breach sources</span>` : ''}
+            ${socialCount > 0 ? `<span class="api-badge"><i class="bi bi-people text-success"></i> ${socialCount} social profiles</span>` : ''}
+            ${data.found_profiles ? `<span class="api-badge"><i class="bi bi-person-check text-info"></i> ${data.found_count || 0} username matches</span>` : ''}
+        </div>
+    `;
+
+    // Render each section
+    const sectionOrder = [
+        'parsed', 'seon', 'golookup', 'callerid_test', 'phoneinfo',
+        'geo', 'shodan', 'virustotal', 'open_ports', 'banners', 'reverse_dns', 'rdap', 'abuse_score',
+        'whois', 'dns_records', 'ip_addresses', 'virustotal', 'ssl', 'security_headers', 'wayback_snapshots',
+        'whatcms', 'zone_transfer',
+        'breach_databases', 'thatsthem', 'whitepages', 'fastpeoplesearch',
+        'google_results', 'google_dorks',
+        'social_media', 'gravatar', 'mx_records', 'spf_record', 'dmarc_record',
+        'emailrep', 'hunter_io',
+        'platforms', 'found_count', 'found_profiles',
+    ];
+
+    // Deduplicate
+    const rendered = new Set();
+    for (const key of sectionOrder) {
+        if (rendered.has(key)) continue;
+        rendered.add(key);
+        const val = data[key];
+        if (val === undefined || val === null) continue;
+        if (Array.isArray(val) && val.length === 0) continue;
+        if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) continue;
+
+        const sectionHtml = renderSection(key, val, data);
+        if (sectionHtml) html += sectionHtml;
+    }
+
+    // Render remaining keys not in order
+    for (const key of Object.keys(data)) {
+        if (rendered.has(key)) continue;
+        const val = data[key];
+        if (val === undefined || val === null) continue;
+        if (Array.isArray(val) && val.length === 0) continue;
+        if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) continue;
+        const sectionHtml = renderSection(key, val, data);
+        if (sectionHtml) html += sectionHtml;
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderSection(key, val, fullData) {
+    const labels = {
+        parsed: '📞 Phone Parsed',
+        geo: '🌍 Geolocation',
+        shodan: '🔍 Shodan',
+        virustotal: '🦠 VirusTotal',
+        open_ports: '🔓 Open Ports',
+        banners: '📋 Service Banners',
+        reverse_dns: '↩ Reverse DNS',
+        rdap: '📄 RDAP / WHOIS IP',
+        abuse_score: '⚠️ AbuseIPDB',
+        whois: '📝 WHOIS',
+        dns_records: '🌐 DNS Records',
+        ip_addresses: '📌 IP Addresses',
+        ssl: '🔒 SSL Certificate',
+        security_headers: '🛡️ Security Headers',
+        wayback_snapshots: '📜 Wayback Machine',
+        whatcms: '⚙️ WhatCMS',
+        zone_transfer: '🔄 Zone Transfer',
+        breach_databases: '💥 Breach Databases',
+        thatsthem: '👤 Thatsthem',
+        whitepages: '📖 Whitepages',
+        fastpeoplesearch: '⚡ FastPeopleSearch',
+        google_results: '🔎 Google Search Results',
+        google_dorks: '🔎 Google Dorks',
+        social_media: '📱 Social Media',
+        gravatar: '🖼️ Gravatar',
+        mx_records: '📧 MX Records',
+        spf_record: '🛡️ SPF Record',
+        dmarc_record: '🛡️ DMARC Record',
+        emailrep: '📊 EmailRep.io',
+        hunter_io: '🎯 Hunter.io',
+        platforms: '🌍 Social Platform Check',
+        found_profiles: '✅ Found Profiles',
+        seon: '🔐 SEON Fraud API',
+        golookup: '📞 GoLookup',
+        callerid_test: '📞 CallerID Test',
+        phoneinfo: '📞 PhoneInfo.io',
+    };
+
+    const label = labels[key] || `📌 ${key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}`;
+    let body = '';
+
+    if (typeof val === 'string') {
+        body = `<div class="result-item"><span class="value">${escapeHtml(val)}</span></div>`;
+    }
+    else if (typeof val === 'number' || typeof val === 'boolean') {
+        body = `<div class="result-item"><span class="value">${val}</span></div>`;
+    }
+    else if (Array.isArray(val)) {
+        if (val.length === 0) return '';
+        if (typeof val[0] === 'string') {
+            body = val.map(v => `<span class="api-badge me-1 mb-1">${escapeHtml(v)}</span>`).join('');
+        } else if (typeof val[0] === 'object') {
+            body = `<div class="table-responsive"><table class="table table-sm data-table mb-0">`;
+            const keys = Object.keys(val[0] || {});
+            body += `<thead><tr>${keys.map(k => `<th>${k}</th>`).join('')}</tr></thead><tbody>`;
+            val.slice(0, 20).forEach(item => {
+                body += `<tr>${keys.map(k => `<td>${escapeHtml(String(item[k] || ''))}</td>`).join('')}</tr>`;
+            });
+            body += `</tbody></table></div>`;
+            if (val.length > 20) body += `<small class="text-secondary">... and ${val.length - 20} more</small>`;
+        } else {
+            body = val.map(v => `<span class="api-badge me-1 mb-1">${escapeHtml(String(v))}</span>`).join('');
+        }
+    }
+    else if (typeof val === 'object') {
+        const entries = Object.entries(val);
+        if (entries.length === 0) return '';
+        body = '<div>';
+        for (const [k, v] of entries) {
+            if (v === null || v === undefined || v === '') continue;
+            let display = typeof v === 'object' && !Array.isArray(v) ?
+                JSON.stringify(v).substring(0, 100) :
+                String(v);
+            display = escapeHtml(display);
+            body += `<div class="result-item d-flex justify-content-between align-items-start">
+                <span class="label">${escapeHtml(k.replace(/_/g, ' '))}</span>
+                <span class="value text-end ms-2" style="max-width:60%;">${display}</span>
+            </div>`;
+        }
+        body += '</div>';
+    }
+
+    if (!body) return '';
+
+    const collapseId = `collapse_${key}`;
+    return `
+        <div class="result-section card mb-2">
+            <div class="card-header collapse-toggle" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="true">
+                ${label}
+                <span class="badge bg-secondary ms-2" style="font-size:0.6rem;">${typeof val === 'object' ? (Array.isArray(val) ? val.length : Object.keys(val).length) : '1'}</span>
+            </div>
+            <div class="collapse show" id="${collapseId}">
+                <div class="card-body">${body}</div>
+            </div>
+        </div>
+    `;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ─── History ─────────────────────────────────────────────────────
+function renderHistory() {
+    const container = document.getElementById('historyList');
+    const card = document.getElementById('historyCard');
+    if (queryHistory.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+    container.innerHTML = queryHistory.slice(0, 10).map(h => `
+        <div class="d-flex align-items-center gap-2 mb-1 small cursor-pointer" style="cursor:pointer;"
+             onclick="document.getElementById('searchInput').value='${escapeHtml(h.query)}'; document.querySelector('[data-type=\\"${h.type}\\"]')?.click();">
+            <span class="api-badge" style="font-size:0.6rem;">${h.type}</span>
+            <span class="text-secondary text-truncate" style="max-width:150px;">${escapeHtml(h.query)}</span>
+        </div>
+    `).join('');
+}
+
+// ─── Stats ────────────────────────────────────────────────────────
+function updateStats() {
+    document.getElementById('statEmail').textContent = stats.email || 0;
+    document.getElementById('statUsername').textContent = stats.username || 0;
+    document.getElementById('statPhone').textContent = stats.phone || 0;
+    document.getElementById('statDomain').textContent = stats.domain || 0;
+}
+
+// ─── Toast ────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+    const toastEl = document.getElementById('liveToast');
+    const toastBody = document.getElementById('toastMessage');
+    toastBody.textContent = msg;
+
+    const headerIcon = toastEl.querySelector('.toast-header i');
+    if (type === 'success') { headerIcon.className = 'bi bi-check-circle me-2 text-success'; }
+    else if (type === 'error') { headerIcon.className = 'bi bi-exclamation-triangle me-2 text-danger'; }
+    else if (type === 'warning') { headerIcon.className = 'bi bi-exclamation-circle me-2 text-warning'; }
+    else { headerIcon.className = 'bi bi-info-circle me-2 text-info'; }
+
+    const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+    toast.show();
+}
 </script>
 </body>
 </html>
