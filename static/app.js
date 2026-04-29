@@ -72,7 +72,6 @@
           </div>`
       )
       .join('');
-
     historyList.querySelectorAll('.history-item').forEach((el) => {
       el.addEventListener('click', () => {
         const type = el.dataset.type;
@@ -133,12 +132,20 @@
   }
 
   function showSpinner(area) {
-    area.innerHTML = `<div class="placeholder"><div class="spinner" style="width:32px;height:32px;"></div><p>Gathering intelligence...</p></div>`;
+    area.innerHTML =
+      '<div class="placeholder"><div class="spinner" style="width:32px;height:32px;"></div><p>Gathering intelligence...</p></div>';
   }
 
   // ─── Search ─────────────────────────────────────────────────────
   function doSearch(type, target) {
     if (!target) return;
+
+    // Clear any existing polling
+    if (state.pollingInterval) {
+      clearInterval(state.pollingInterval);
+      state.pollingInterval = null;
+    }
+
     searchBtn.disabled = true;
     searchBtn.textContent = 'Searching...';
     placeholder.style.display = 'none';
@@ -162,11 +169,11 @@
           return;
         }
         state.activeTaskId = data.task_id;
-        setStatus('Processing...', 10);
-        startPolling(data.task_id, type, target);
+        setStatus('Lookup queued — polling for results...', 10);
+        pollTask(data.task_id, type);
       })
       .catch((err) => {
-        showError('Network error: ' + err.message);
+        showError('Network error: could not reach server');
         searchBtn.disabled = false;
         searchBtn.textContent = 'Search';
         hideStatus();
@@ -174,152 +181,142 @@
       });
   }
 
-  // ─── Polling ────────────────────────────────────────────────────
-  function startPolling(taskId, type, target) {
-    if (state.pollingInterval) clearInterval(state.pollingInterval);
-    state.pollingInterval = setInterval(() => pollTask(taskId, type, target), 800);
+  // ─── Poll Task ──────────────────────────────────────────────────
+  function pollTask(taskId, type) {
+    if (state.pollingInterval) {
+      clearInterval(state.pollingInterval);
+    }
+
+    let attempts = 0;
+    const maxAttempts = 90; // 90 * 2s = 3 min timeout
+
+    state.pollingInterval = setInterval(() => {
+      attempts++;
+
+      fetch(`/api/status/${taskId}`)
+        .then((r) => r.json())
+        .then((task) => {
+          if (task.error) {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            showError(task.error);
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+            hideStatus();
+            addToHistory(type, '?', 'error');
+            return;
+          }
+
+          // Update progress
+          const progress = task.progress || 0;
+          setStatus(
+            `Status: ${task.status} — ${task.message || 'Working...'}`,
+            progress
+          );
+
+          // Complete
+          if (task.status === 'complete') {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+            hideStatus();
+            addToHistory(type, task.target || '?', 'complete');
+            showResults(type, task.results || {});
+            return;
+          }
+
+          // Error
+          if (task.status === 'error') {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+            hideStatus();
+            addToHistory(type, task.target || '?', 'error');
+            showError(task.message || 'Lookup failed');
+            return;
+          }
+
+          // Timeout
+          if (attempts >= maxAttempts) {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+            hideStatus();
+            showError('Lookup timed out after 3 minutes');
+            addToHistory(type, '?', 'timeout');
+          }
+        })
+        .catch(() => {
+          if (attempts >= maxAttempts) {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            searchBtn.disabled = false;
+            searchBtn.textContent = 'Search';
+            hideStatus();
+            showError('Connection lost during lookup');
+            addToHistory(type, '?', 'error');
+          }
+        });
+    }, 2000);
   }
 
-  function pollTask(taskId, type, target) {
-    fetch('/api/status/' + taskId)
-      .then((r) => r.json())
-      .then((task) => {
-        if (task.error) {
-          clearInterval(state.pollingInterval);
-          state.pollingInterval = null;
-          showError(task.error);
-          searchBtn.disabled = false;
-          searchBtn.textContent = 'Search';
-          hideStatus();
-          addToHistory(type, target, 'error');
-          return;
-        }
-
-        setStatus(
-          task.status === 'running' ? 'Analyzing...' : task.status === 'complete' ? 'Complete' : 'Error',
-          task.progress || 0
-        );
-
-        if (task.status === 'complete') {
-          clearInterval(state.pollingInterval);
-          state.pollingInterval = null;
-          renderResults(task.results, type, target);
-          searchBtn.disabled = false;
-          searchBtn.textContent = 'Search';
-          setTimeout(hideStatus, 2000);
-          addToHistory(type, target, 'done');
-        } else if (task.status === 'error') {
-          clearInterval(state.pollingInterval);
-          state.pollingInterval = null;
-          showError(task.error || 'Unknown error occurred');
-          searchBtn.disabled = false;
-          searchBtn.textContent = 'Search';
-          hideStatus();
-          addToHistory(type, target, 'error');
-        }
-      })
-      .catch(() => {});
-  }
-
-  // ─── Render Results ─────────────────────────────────────────────
-  function renderResults(results, type, target) {
-    if (!results || results.error) {
-      showError(results ? results.error : 'No results returned');
+  // ─── Show Results ──────────────────────────────────────────────
+  function showResults(type, results) {
+    if (!results || Object.keys(results).length === 0) {
+      resultsArea.innerHTML =
+        '<div class="placeholder"><p>No intelligence data returned for this target.</p></div>';
       return;
     }
 
     let html = '';
 
-    // Helper: key-value table
-    const kv = (obj, keys) => {
-      if (!obj) return '';
-      return Object.entries(obj)
-        .filter(([, v]) => v !== null && v !== undefined && v !== '')
-        .map(([k, v]) => {
-          const label = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-          let val = v;
-          if (typeof v === 'object') val = `<pre class="code-block">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
-          else if (typeof v === 'boolean') val = v ? '<span class="tag tag-success">Yes</span>' : '<span class="tag tag-danger">No</span>';
-          else val = escapeHtml(String(v));
-          return `<tr><th>${label}</th><td>${val}</td></tr>`;
-        })
-        .join('');
-    };
+    function kv(obj, ...only) {
+      const keys = only.length ? only : Object.keys(obj);
+      let tbl = '';
+      keys.forEach((k) => {
+        const v = obj[k];
+        if (v === undefined || v === null || v === '') return;
+        const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        tbl += `<tr><td><strong>${escapeHtml(k.replace(/_/g, ' '))}</strong></td><td>${escapeHtml(val)}</td></tr>`;
+      });
+      return tbl ? `<table class="result-table">${tbl}</table>` : '';
+    }
 
     // Email results
     if (type === 'email') {
       if (results.hunter_verification) {
-        html += `<div class="result-section"><h3>🔍 Hunter.io Verification</h3><table class="result-table">${kv(results.hunter_verification)}</table></div>`;
+        html += `<div class="result-section"><h3>📧 Hunter Verification</h3>${kv(results.hunter_verification)}</div>`;
       }
       if (results.gravatar) {
-        html += `<div class="result-section"><h3>🪐 Gravatar</h3><table class="result-table">${kv(results.gravatar)}</table></div>`;
+        html += `<div class="result-section"><h3>👤 Gravatar</h3>${kv(results.gravatar)}</div>`;
       }
       if (results.emailrep) {
-        html += `<div class="result-section"><h3>📊 EmailRep.io</h3><table class="result-table">${kv(results.emailrep)}</table></div>`;
+        html += `<div class="result-section"><h3>⚠️ EmailRep</h3>${kv(results.emailrep)}</div>`;
       }
-      if (results.mx_records) {
-        const rows = results.mx_records.map(
-          (mx) => `<tr><th>MX</th><td>${escapeHtml(mx.host)} (priority ${mx.priority})</td></tr>`
-        ).join('');
-        html += `<div class="result-section"><h3>📧 MX Records</h3><table class="result-table">${rows}</table></div>`;
-      }
-      if (results.dehashed) {
-        html += `<div class="result-section"><h3>⚠️ Dehashed Breach Data</h3><p style="color:var(--danger);margin-bottom:10px;">${results.dehashed.total} entries found</p>`;
-        if (results.dehashed.entries) {
-          html += results.dehashed.entries.map((e) =>
-            `<div class="code-block">
-              ${e.email ? 'Email: ' + escapeHtml(e.email) : ''}
-              ${e.username ? ' | User: ' + escapeHtml(e.username) : ''}
-              ${e.password ? ' | Pass: ' + escapeHtml(e.password) : ''}
-              ${e.name ? ' | Name: ' + escapeHtml(e.name) : ''}
-              ${e.database_name ? ' | DB: ' + escapeHtml(e.database_name) : ''}
-            </div>`
-          ).join('');
-        }
-        html += `</div>`;
-      }
-      if (results.social_profiles) {
-        const links = Object.entries(results.social_profiles).filter(([, v]) => v);
-        if (links.length) {
-          html += `<div class="result-section"><h3>🔗 Social Profiles</h3><div class="list-compact">`;
-          links.forEach(([site, url]) => {
-            html += `<a href="${escapeHtml(url)}" target="_blank" class="item" style="color:var(--accent);text-decoration:none;">${escapeHtml(site)}</a>`;
-          });
-          html += `</div></div>`;
-        }
-      }
-    }
-
-    // Username results
-    if (type === 'username') {
-      if (results.social_media && Object.keys(results.social_media).length) {
-        html += `<div class="result-section"><h3>🔗 Social Media Profiles Found</h3><div class="list-compact">`;
-        Object.entries(results.social_media).forEach(([name, url]) => {
-          html += `<a href="${escapeHtml(url)}" target="_blank" class="item" style="color:var(--accent);text-decoration:none;">${escapeHtml(name)}</a>`;
-        });
+      if (results.mx_records && results.mx_records.length) {
+        html += `<div class="result-section"><h3>📬 MX Records</h3><div class="list-compact">`;
+        results.mx_records.forEach((m) => { html += `<span class="item">${escapeHtml(m)}</span>`; });
         html += `</div></div>`;
-      } else {
-        html += `<div class="result-section"><h3>🔗 Social Media</h3><p style="color:var(--text-secondary);">No social media profiles found</p></div>`;
       }
-      if (results.dehashed) {
-        html += `<div class="result-section"><h3>⚠️ Dehashed Breach Data</h3><p style="color:var(--danger);margin-bottom:10px;">${results.dehashed.total} entries found</p>`;
-        if (results.dehashed.entries) {
-          html += results.dehashed.entries.map((e) =>
-            `<div class="code-block">
-              ${e.email ? 'Email: ' + escapeHtml(e.email) : ''}
-              ${e.name ? ' | Name: ' + escapeHtml(e.name) : ''}
-              ${e.password ? ' | Pass: ' + escapeHtml(e.password) : ''}
-              ${e.database_name ? ' | DB: ' + escapeHtml(e.database_name) : ''}
-            </div>`
-          ).join('');
-        }
-        html += `</div>`;
+      if (results.dehashed && Object.keys(results.dehashed).length) {
+        html += `<div class="result-section"><h3>🔑 Dehashed</h3>${kv(results.dehashed)}</div>`;
+      }
+      if (results.social_profiles && results.social_profiles.length) {
+        html += `<div class="result-section"><h3>🌐 Social Profiles</h3><div class="list-compact">`;
+        results.social_profiles.forEach((p) => { html += `<span class="item">${escapeHtml(p)}</span>`; });
+        html += `</div></div>`;
+      }
+      if (results.social_media && results.social_media.length) {
+        html += `<div class="result-section"><h3>📱 Social Media</h3><div class="list-compact">`;
+        results.social_media.forEach((s) => { html += `<span class="item">${escapeHtml(s)}</span>`; });
+        html += `</div></div>`;
       }
       if (results.google_mentions && results.google_mentions.length) {
-        html += `<div class="result-section"><h3>🌐 Google Mentions</h3><div class="list-compact">`;
-        results.google_mentions.forEach((url) => {
-          html += `<a href="${escapeHtml(url)}" target="_blank" class="item" style="color:var(--accent);text-decoration:none;max-width:300px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(url)}</a>`;
-        });
+        html += `<div class="result-section"><h3>🔍 Google Mentions</h3><div class="list-compact">`;
+        results.google_mentions.forEach((g) => { html += `<span class="item">${escapeHtml(g)}</span>`; });
         html += `</div></div>`;
       }
     }
@@ -327,85 +324,71 @@
     // Phone results
     if (type === 'phone') {
       if (results.parsed) {
-        html += `<div class="result-section"><h3>📞 Phone Number Details</h3><table class="result-table">${kv(results.parsed)}</table></div>`;
+        html += `<div class="result-section"><h3>🔢 Parsed Number</h3>${kv(results.parsed)}</div>`;
       }
       if (results.country) {
-        html += `<div class="result-section"><h3>🌍 Location</h3><table class="result-table"><tr><th>Country</th><td>${escapeHtml(results.country)}</td></tr><tr><th>Carrier</th><td>${escapeHtml(results.carrier || 'Unknown')}</td></tr><tr><th>Type</th><td>${escapeHtml(results.number_type || 'Unknown')}</td></tr></table></div>`;
+        html += `<div class="result-section"><h3>🌍 Country</h3><p>${escapeHtml(results.country)}</p></div>`;
       }
-      if (results.dehashed) {
-        html += `<div class="result-section"><h3>⚠️ Dehashed Breach Data</h3><p style="color:var(--danger);margin-bottom:10px;">${results.dehashed.total} entries found</p>`;
-        if (results.dehashed.entries) {
-          html += results.dehashed.entries.map((e) =>
-            `<div class="code-block">
-              ${e.name ? 'Name: ' + escapeHtml(e.name) : ''}
-              ${e.email ? ' | Email: ' + escapeHtml(e.email) : ''}
-              ${e.address ? ' | Address: ' + escapeHtml(e.address) : ''}
-              ${e.database_name ? ' | DB: ' + escapeHtml(e.database_name) : ''}
-            </div>`
-          ).join('');
-        }
-        html += `</div>`;
+      if (results.carrier) {
+        html += `<div class="result-section"><h3>📡 Carrier</h3><p>${escapeHtml(results.carrier)}</p></div>`;
+      }
+      if (results.number_type) {
+        html += `<div class="result-section"><h3>📞 Number Type</h3><p>${escapeHtml(results.number_type)}</p></div>`;
+      }
+      if (results.timezones && results.timezones.length) {
+        html += `<div class="result-section"><h3>🕐 Timezones</h3><div class="list-compact">`;
+        results.timezones.forEach((t) => { html += `<span class="item">${escapeHtml(t)}</span>`; });
+        html += `</div></div>`;
       }
     }
 
     // Domain results
     if (type === 'domain') {
-      if (results.dns_records) {
-        const dnsHtml = Object.entries(results.dns_records)
-          .filter(([, v]) => v.length)
-          .map(([rtype, records]) =>
-            `<tr><th>${rtype}</th><td>${records.map((r) => `<span class="item" style="font-family:monospace;">${escapeHtml(String(r))}</span>`).join(' ')}</td></tr>`
-          ).join('');
+      if (results.dns_records && Object.keys(results.dns_records).length) {
+        let dnsHtml = '';
+        Object.entries(results.dns_records).forEach(([key, vals]) => {
+          if (vals && vals.length) {
+            dnsHtml += `<tr><td><strong>${escapeHtml(key.toUpperCase())}</strong></td><td>${vals.map(v => escapeHtml(String(v))).join(', ')}</td></tr>`;
+          }
+        });
         if (dnsHtml) {
           html += `<div class="result-section"><h3>🌐 DNS Records</h3><table class="result-table">${dnsHtml}</table></div>`;
         }
       }
       if (results.whois) {
-        html += `<div class="result-section"><h3>📋 WHOIS</h3><table class="result-table">${kv(results.whois)}</table></div>`;
+        html += `<div class="result-section"><h3>📋 WHOIS</h3>${kv(results.whois)}</div>`;
       }
       if (results.virustotal) {
-        html += `<div class="result-section"><h3>🛡️ VirusTotal</h3><table class="result-table">${kv(results.virustotal)}</table></div>`;
+        html += `<div class="result-section"><h3>🛡️ VirusTotal</h3>${kv(results.virustotal)}</div>`;
       }
-      if (results.security_headers && !results.security_headers.error) {
-        html += `<div class="result-section"><h3>🔒 Security Headers</h3><table class="result-table">${kv(results.security_headers)}</table></div>`;
+      if (results.security_headers) {
+        html += `<div class="result-section"><h3>🔒 Security Headers</h3>${kv(results.security_headers)}</div>`;
       }
       if (results.technology && results.technology.length) {
         html += `<div class="result-section"><h3>⚙️ Technology Stack</h3><div class="list-compact">`;
-        results.technology.forEach((t) => {
-          html += `<span class="item">${escapeHtml(t)}</span>`;
-        });
+        results.technology.forEach((t) => { html += `<span class="item">${escapeHtml(t)}</span>`; });
         html += `</div></div>`;
       }
       if (results.subdomains && results.subdomains.length) {
         html += `<div class="result-section"><h3>🔗 Subdomains (${results.subdomains.length})</h3><div class="list-compact">`;
-        results.subdomains.forEach((s) => {
-          html += `<span class="item">${escapeHtml(s)}</span>`;
-        });
+        results.subdomains.forEach((s) => { html += `<span class="item">${escapeHtml(s)}</span>`; });
         html += `</div></div>`;
       }
       if (results.open_ports && results.open_ports.length) {
         html += `<div class="result-section"><h3>🔌 Open Ports</h3><div class="list-compact">`;
-        results.open_ports.forEach((p) => {
-          html += `<span class="item">Port ${p}</span>`;
-        });
+        results.open_ports.forEach((p) => { html += `<span class="item">Port ${escapeHtml(String(p))}</span>`; });
         html += `</div></div>`;
       }
       if (results.wayback && results.wayback.length) {
         html += `<div class="result-section"><h3>📜 Wayback Machine Snapshots</h3><div class="list-compact">`;
         results.wayback.forEach((w) => {
-          html += `<div class="code-block" style="margin:2px 0;font-size:0.75rem;">
-            <a href="https://web.archive.org/web/${w.date}/${escapeHtml(w.url)}" target="_blank" style="color:var(--accent);">
-              ${escapeHtml(w.date)} — ${escapeHtml(w.url)}
-            </a>
-          </div>`;
+          html += `<span class="item"><a href="https://web.archive.org/web/${w.date}/${escapeHtml(w.url)}" target="_blank">${escapeHtml(w.date)} — ${escapeHtml(w.url)}</a></span>`;
         });
         html += `</div></div>`;
       }
       if (results.zone_transfer && results.zone_transfer.length) {
         html += `<div class="result-section"><h3>⚠️ Zone Transfer (Successful!)</h3><div class="list-compact">`;
-        results.zone_transfer.forEach((z) => {
-          html += `<span class="item">${escapeHtml(z)}</span>`;
-        });
+        results.zone_transfer.forEach((z) => { html += `<span class="item">${escapeHtml(z)}</span>`; });
         html += `</div></div>`;
       }
     }
@@ -413,10 +396,10 @@
     // IP results
     if (type === 'ip') {
       if (results.hostname) {
-        html += `<div class="result-section"><h3>🏠 Hostname</h3><table class="result-table"><tr><th>PTR</th><td>${escapeHtml(results.hostname)}</td></tr></table></div>`;
+        html += `<div class="result-section"><h3>🏠 Hostname</h3><table class="result-table"><tr><td><strong>PTR</strong></td><td>${escapeHtml(results.hostname)}</td></tr></table></div>`;
       }
       if (results.geo) {
-        html += `<div class="result-section"><h3>🌍 Geolocation</h3><table class="result-table">${kv(results.geo)}</table></div>`;
+        html += `<div class="result-section"><h3>🌍 Geolocation</h3>${kv(results.geo)}</div>`;
       }
       if (results.reverse_dns && results.reverse_dns.length) {
         html += `<div class="result-section"><h3>🔄 Reverse DNS</h3><div class="list-compact">`;
@@ -424,55 +407,51 @@
         html += `</div></div>`;
       }
       if (results.shodan) {
-        html += `<div class="result-section"><h3>⚡ Shodan</h3><table class="result-table">${kv(results.shodan, 'org', 'isp', 'os', 'hostnames')}</table>`;
+        html += `<div class="result-section"><h3>⚡ Shodan</h3>${kv(results.shodan, 'org', 'isp', 'os', 'hostnames')}`;
         if (results.shodan.services) {
-          html += `<div style="margin-top:8px;"><strong>Services:</strong><div class="list-compact">`;
+          html += `<p><strong>Services:</strong></p><div class="list-compact">`;
           results.shodan.services.forEach((s) => {
             html += `<span class="item">Port ${s.port} — ${escapeHtml(s.service || s.name || '?')}</span>`;
           });
-          html += `</div></div>`;
+          html += `</div>`;
         }
         if (results.shodan.vulns && results.shodan.vulns.length) {
-          html += `<div style="margin-top:8px;"><strong>Vulnerabilities:</strong><div class="list-compact">`;
-          results.shodan.vulns.forEach((v) => {
-            html += `<span class="tag tag-danger">${escapeHtml(v)}</span>`;
-          });
-          html += `</div></div>`;
+          html += `<p><strong>Vulnerabilities:</strong></p><div class="list-compact">`;
+          results.shodan.vulns.forEach((v) => { html += `<span class="item">${escapeHtml(v)}</span>`; });
+          html += `</div>`;
         }
         html += `</div>`;
       }
       if (results.virustotal) {
-        html += `<div class="result-section"><h3>🛡️ VirusTotal</h3><table class="result-table">${kv(results.virustotal)}</table></div>`;
+        html += `<div class="result-section"><h3>🛡️ VirusTotal</h3>${kv(results.virustotal)}</div>`;
       }
       if (results.open_ports && results.open_ports.length) {
         html += `<div class="result-section"><h3>🔌 Open Ports (${results.open_ports.length})</h3><div class="list-compact">`;
-        results.open_ports.forEach((p) => {
-          html += `<span class="item">Port ${p}</span>`;
-        });
+        results.open_ports.forEach((p) => { html += `<span class="item">Port ${escapeHtml(String(p))}</span>`; });
         html += `</div></div>`;
       }
       if (results.banners) {
         html += `<div class="result-section"><h3>📡 Service Banners</h3><table class="result-table">`;
         Object.entries(results.banners).forEach(([port, banner]) => {
-          html += `<tr><th>Port ${port}</th><td class="code-block">${escapeHtml(banner)}</td></tr>`;
+          html += `<tr><td><strong>Port ${escapeHtml(port)}</strong></td><td>${escapeHtml(banner)}</td></tr>`;
         });
         html += `</table></div>`;
       }
       if (results.rdap) {
         let rdapHtml = '';
-        if (results.rdap.handle) rdapHtml += `<tr><th>Handle</th><td>${escapeHtml(results.rdap.handle)}</td></tr>`;
-        if (results.rdap.name) rdapHtml += `<tr><th>Org</th><td>${escapeHtml(results.rdap.name)}</td></tr>`;
-        if (results.rdap.org_name) rdapHtml += `<tr><th>Org Name</th><td>${escapeHtml(results.rdap.org_name)}</td></tr>`;
-        if (results.rdap.country) rdapHtml += `<tr><th>Country</th><td>${escapeHtml(results.rdap.country)}</td></tr>`;
+        if (results.rdap.handle) rdapHtml += `<tr><td><strong>Handle</strong></td><td>${escapeHtml(results.rdap.handle)}</td></tr>`;
+        if (results.rdap.name) rdapHtml += `<tr><td><strong>Org</strong></td><td>${escapeHtml(results.rdap.name)}</td></tr>`;
+        if (results.rdap.org_name) rdapHtml += `<tr><td><strong>Org Name</strong></td><td>${escapeHtml(results.rdap.org_name)}</td></tr>`;
+        if (results.rdap.country) rdapHtml += `<tr><td><strong>Country</strong></td><td>${escapeHtml(results.rdap.country)}</td></tr>`;
         if (results.rdap.emails && results.rdap.emails.length) {
-          rdapHtml += `<tr><th>Emails</th><td>${results.rdap.emails.map(e => escapeHtml(e)).join(', ')}</td></tr>`;
+          rdapHtml += `<tr><td><strong>Emails</strong></td><td>${results.rdap.emails.map(e => escapeHtml(e)).join(', ')}</td></tr>`;
         }
         if (rdapHtml) {
           html += `<div class="result-section"><h3>📋 RDAP</h3><table class="result-table">${rdapHtml}</table></div>`;
         }
       }
       if (results.abuse_score) {
-        html += `<div class="result-section"><h3>🚨 AbuseIPDB</h3><table class="result-table"><tr><th>Confidence Score</th><td>${escapeHtml(results.abuse_score)}</td></tr></table></div>`;
+        html += `<div class="result-section"><h3>🚨 AbuseIPDB</h3><table class="result-table"><tr><td><strong>Confidence Score</strong></td><td>${escapeHtml(results.abuse_score)}</td></tr></table></div>`;
       }
     }
 
@@ -492,7 +471,7 @@
     rawKeys.forEach((k) => {
       const v = results[k];
       if (v && typeof v === 'object' && !Array.isArray(v)) {
-        html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3><table class="result-table">${kv(v)}</table></div>`;
+        html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3>${kv(v)}</div>`;
       } else if (v && Array.isArray(v) && v.length) {
         html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3><div class="list-compact">`;
         v.forEach((item) => {
@@ -503,7 +482,7 @@
     });
 
     if (!html) {
-      html = `<div class="placeholder"><p>No intelligence data returned for this target.</p></div>`;
+      html = '<div class="placeholder"><p>No intelligence data returned for this target.</p></div>';
     }
 
     resultsArea.innerHTML = html;
