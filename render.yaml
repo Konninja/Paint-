@@ -20,3 +20,33 @@ services:
         sync: false
       - key: VIRUSTOTAL_API_KEY
         sync: false
+      - key: SNUSBASE_API_KEY
+        sync: false
+      - key: BETA_SNUSBASE_KEY
+        sync: false
+      - key: LEAKCHECK_API_KEY
+        sync: false
+      - key: INTELVAULT_KEY
+        sync: false
+      - key: CSINT_TOOLS_KEY1
+        sync: false
+      - key: CSINT_TOOLS_KEY2
+        sync: false
+      - key: TRACKED_SH_KEY1
+        sync: false
+      - key: TRACKED_SH_KEY2
+        sync: false
+      - key: OSINTCAT_KEY1
+        sync: false
+      - key: OSINTCAT_KEY2
+        sync: false
+      - key: SOURCE_RED_KEY
+        sync: false
+      - key: SEON_API_KEY
+        sync: false
+      - key: OSINTWAVE_KEY
+        sync: false
+      - key: GOLOOKUP_EMAIL
+        sync: false
+      - key: GOLOOKUP_PASS
+        sync: false
