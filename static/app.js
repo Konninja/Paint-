@@ -55,8 +55,7 @@
   function renderHistory() {
     if (!historyList) return;
     if (state.history.length === 0) {
-      historyList.innerHTML =
-        '<div style="color:#3a4a6a;font-size:0.85em;text-align:center;padding:20px;">No queries yet</div>';
+      historyList.innerHTML = '<div class="history-empty">No queries yet</div>';
       return;
     }
     historyList.innerHTML = state.history
@@ -65,18 +64,17 @@
       .slice(0, 15)
       .map(
         (h) =>
-          `<div class="history-item" data-type="${h.type}" data-target="${h.target}">
-            <span class="h-type">${h.type}</span>
-            <span class="h-target">${escapeHtml(h.target)}</span>
-            <span class="h-status">${h.status}</span>
+          `<div class="history-item" data-type="${escapeHtml(h.type)}" data-target="${escapeHtml(h.target)}">
+            <span class="history-type">${escapeHtml(h.type)}</span>
+            <span class="history-target">${escapeHtml(h.target)}</span>
+            <span class="history-time">${h.time ? new Date(h.time).toLocaleString() : ''}</span>
           </div>`
       )
       .join('');
-    historyList.querySelectorAll('.history-item').forEach((el) => {
-      el.addEventListener('click', () => {
-        const type = el.dataset.type;
-        const target = el.dataset.target;
-        state.activeType = type;
+    document.querySelectorAll('.history-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const type = item.dataset.type;
+        const target = item.dataset.target;
         setActiveType(type);
         queryInput.value = target;
         doSearch(type, target);
@@ -84,247 +82,226 @@
     });
   }
 
-  function addToHistory(type, target, status) {
-    state.history.unshift({ type, target, status, time: Date.now() });
-    if (state.history.length > 50) state.history.pop();
-    saveHistory();
-    renderHistory();
-  }
-
-  // ─── Helpers ────────────────────────────────────────────────────
+  // ─── Utility ────────────────────────────────────────────────────
   function escapeHtml(str) {
+    if (!str) return '';
     const div = document.createElement('div');
-    div.textContent = str;
+    div.appendChild(document.createTextNode(str));
     return div.innerHTML;
   }
 
-  function setActiveType(type) {
-    state.activeType = type;
-    queryBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.type === type));
-    queryLabel.textContent = type.charAt(0).toUpperCase() + type.slice(1);
-    queryInput.placeholder = getPlaceholder(type);
-    queryInput.focus();
+  function kv(obj, ...priority) {
+    if (!obj) return '';
+    let html = '<table class="kv-table">';
+    const keys = priority.length ? priority.filter((k) => k in obj) : Object.keys(obj);
+    keys.forEach((k) => {
+      const v = obj[k];
+      if (v === null || v === undefined) return;
+      const val =
+        typeof v === 'object' ? JSON.stringify(v) : String(v);
+      if (val.length > 200) return;
+      html += `<tr><td class="kv-key">${escapeHtml(k.replace(/_/g, ' '))}</td><td class="kv-val">${escapeHtml(val)}</td></tr>`;
+    });
+    html += '</table>';
+    return html;
   }
 
-  function getPlaceholder(type) {
-    const map = {
-      email: 'user@example.com',
-      username: 'johndoe',
-      phone: '+14155551234',
-      domain: 'example.com',
-      ip: '8.8.8.8',
-    };
-    return map[type] || 'Enter target...';
-  }
-
-  // ─── UI Status ──────────────────────────────────────────────────
-  function setStatus(text, progress) {
-    statusBar.style.display = 'flex';
-    statusText.textContent = text;
-    if (progress !== undefined) {
-      progressFill.style.width = Math.min(progress, 100) + '%';
+  // ─── Status Bar ─────────────────────────────────────────────────
+  function showStatus(msg) {
+    if (statusBar) statusBar.style.display = 'flex';
+    if (statusText) statusText.textContent = msg;
+    if (statusIndicator) {
+      statusIndicator.className = 'spinner';
     }
   }
 
   function hideStatus() {
-    statusBar.style.display = 'none';
-    progressFill.style.width = '0%';
+    if (statusBar) statusBar.style.display = 'none';
+    if (progressFill) progressFill.style.width = '0%';
   }
 
-  function showSpinner(area) {
-    area.innerHTML =
-      '<div class="placeholder"><div class="spinner" style="width:32px;height:32px;"></div><p>Gathering intelligence...</p></div>';
+  function setProgress(pct) {
+    if (progressFill) progressFill.style.width = Math.min(pct, 100) + '%';
   }
 
-  // ─── Search ─────────────────────────────────────────────────────
-  function doSearch(type, target) {
-    if (!target) return;
+  // ─── Active Type ────────────────────────────────────────────────
+  function setActiveType(type) {
+    state.activeType = type;
+    queryBtns.forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.type === type);
+    });
+    const labels = {
+      email: 'Enter email address',
+      username: 'Enter username',
+      domain: 'Enter domain (e.g. example.com)',
+      ip: 'Enter IP address',
+      phone: 'Enter phone number (with country code)',
+    };
+    if (queryLabel) queryLabel.textContent = labels[type] || 'Enter target';
+    if (queryInput) queryInput.placeholder = labels[type] || 'Enter target';
+    queryInput.focus();
+  }
 
-    // Clear any existing polling
+  // ─── POLL TASK — polls /api/status/<task_id> every 2s ───────────
+  function pollTask(taskId) {
+    // Clear any existing poll
     if (state.pollingInterval) {
       clearInterval(state.pollingInterval);
       state.pollingInterval = null;
     }
 
-    searchBtn.disabled = true;
-    searchBtn.textContent = 'Searching...';
-    placeholder.style.display = 'none';
-    showSpinner(resultsArea);
-    setStatus('Queuing lookup...', 5);
-    addToHistory(type, target, 'running');
-
-    fetch('/api/lookup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, target }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) {
-          showError(data.error);
-          searchBtn.disabled = false;
-          searchBtn.textContent = 'Search';
-          hideStatus();
-          addToHistory(type, target, 'error');
-          return;
+    state.pollingInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/status/${taskId}`);
+        if (!res.ok) {
+          // 404 means task not found — stop polling
+          if (res.status === 404) {
+            clearInterval(state.pollingInterval);
+            state.pollingInterval = null;
+            showError('Task not found. It may have expired.');
+            return;
+          }
+          throw new Error(`Status check failed: ${res.status}`);
         }
-        state.activeTaskId = data.task_id;
-        setStatus('Lookup queued — polling for results...', 10);
-        pollTask(data.task_id, type);
-      })
-      .catch((err) => {
-        showError('Network error: could not reach server');
-        searchBtn.disabled = false;
-        searchBtn.textContent = 'Search';
-        hideStatus();
-        addToHistory(type, target, 'error');
-      });
-  }
+        const data = await res.json();
 
-  // ─── Poll Task ──────────────────────────────────────────────────
-  function pollTask(taskId, type) {
-    if (state.pollingInterval) {
-      clearInterval(state.pollingInterval);
-    }
-
-    let attempts = 0;
-    const maxAttempts = 90; // 90 * 2s = 3 min timeout
-
-    state.pollingInterval = setInterval(() => {
-      attempts++;
-
-      fetch(`/api/status/${taskId}`)
-        .then((r) => r.json())
-        .then((task) => {
-          if (task.error) {
-            clearInterval(state.pollingInterval);
-            state.pollingInterval = null;
-            showError(task.error);
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
-            hideStatus();
-            addToHistory(type, '?', 'error');
-            return;
+        if (data.status === 'processing') {
+          showStatus(`Processing... ${data.progress || ''}`);
+          if (data.progress_pct) setProgress(data.progress_pct);
+        } else if (data.status === 'complete' || data.status === 'completed') {
+          clearInterval(state.pollingInterval);
+          state.pollingInterval = null;
+          hideStatus();
+          if (data.result) {
+            showResults(data.result, state.activeType);
+          } else {
+            showError('Task completed but no results returned.');
           }
-
-          // Update progress
-          const progress = task.progress || 0;
-          setStatus(
-            `Status: ${task.status} — ${task.message || 'Working...'}`,
-            progress
-          );
-
-          // Complete
-          if (task.status === 'complete') {
-            clearInterval(state.pollingInterval);
-            state.pollingInterval = null;
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
-            hideStatus();
-            addToHistory(type, task.target || '?', 'complete');
-            showResults(type, task.results || {});
-            return;
-          }
-
-          // Error
-          if (task.status === 'error') {
-            clearInterval(state.pollingInterval);
-            state.pollingInterval = null;
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
-            hideStatus();
-            addToHistory(type, task.target || '?', 'error');
-            showError(task.message || 'Lookup failed');
-            return;
-          }
-
-          // Timeout
-          if (attempts >= maxAttempts) {
-            clearInterval(state.pollingInterval);
-            state.pollingInterval = null;
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
-            hideStatus();
-            showError('Lookup timed out after 3 minutes');
-            addToHistory(type, '?', 'timeout');
-          }
-        })
-        .catch(() => {
-          if (attempts >= maxAttempts) {
-            clearInterval(state.pollingInterval);
-            state.pollingInterval = null;
-            searchBtn.disabled = false;
-            searchBtn.textContent = 'Search';
-            hideStatus();
-            showError('Connection lost during lookup');
-            addToHistory(type, '?', 'error');
-          }
-        });
+        } else if (data.status === 'error' || data.status === 'failed') {
+          clearInterval(state.pollingInterval);
+          state.pollingInterval = null;
+          hideStatus();
+          showError(data.error || 'Task failed with an unknown error.');
+        }
+        // status === 'queued' — keep waiting
+      } catch (err) {
+        // Network error — keep polling unless it's a definitive failure
+        console.error('Poll error:', err);
+      }
     }, 2000);
   }
 
-  // ─── Show Results ──────────────────────────────────────────────
-  function showResults(type, results) {
-    if (!results || Object.keys(results).length === 0) {
-      resultsArea.innerHTML =
-        '<div class="placeholder"><p>No intelligence data returned for this target.</p></div>';
+  // ─── DO SEARCH — sends target to /api/lookup, then starts polling ─
+  async function doSearch(type, target) {
+    if (!target || !target.trim()) {
+      showError('Target cannot be empty');
       return;
     }
 
-    let html = '';
+    // Clear previous results
+    resultsArea.innerHTML = '';
+    placeholder.style.display = 'none';
+    showStatus(`Looking up ${escapeHtml(target)}...`);
 
-    function kv(obj, ...only) {
-      const keys = only.length ? only : Object.keys(obj);
-      let tbl = '';
-      keys.forEach((k) => {
-        const v = obj[k];
-        if (v === undefined || v === null || v === '') return;
-        const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
-        tbl += `<tr><td><strong>${escapeHtml(k.replace(/_/g, ' '))}</strong></td><td>${escapeHtml(val)}</td></tr>`;
-      });
-      return tbl ? `<table class="result-table">${tbl}</table>` : '';
+    // Cancel any existing poll
+    if (state.pollingInterval) {
+      clearInterval(state.pollingInterval);
+      state.pollingInterval = null;
     }
 
-    // Email results
+    try {
+      const res = await fetch('/api/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, target: target.trim() }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        showError(errData.error || `Server error: ${res.status}`);
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.status === 'complete' || data.status === 'completed') {
+        // Synchronous completion
+        hideStatus();
+        if (data.result) {
+          showResults(data.result, type);
+        } else {
+          showError('No results returned.');
+        }
+        return;
+      }
+
+      if (data.task_id) {
+        state.activeTaskId = data.task_id;
+        showStatus('Task queued — waiting for results...');
+        // Start polling
+        pollTask(data.task_id);
+      } else {
+        showError('No task_id returned from server.');
+      }
+    } catch (err) {
+      showError('Network error: could not reach server.');
+    }
+  }
+
+  // ─── Show Results ───────────────────────────────────────────────
+  function showResults(results, type) {
+    if (!results) {
+      showError('No results returned.');
+      return;
+    }
+
+    // Save to history
+    const target = queryInput.value.trim();
+    if (target) {
+      state.history.push({ type, target, time: Date.now() });
+      if (state.history.length > 100) state.history.shift();
+      saveHistory();
+      renderHistory();
+    }
+
+    let html = `<div class="results-header">Results for ${escapeHtml(target || '')} (${escapeHtml(type)})</div>`;
+
+    // ─── Email ──────────────────────────────────────────────────
     if (type === 'email') {
       if (results.hunter_verification) {
-        html += `<div class="result-section"><h3>📧 Hunter Verification</h3>${kv(results.hunter_verification)}</div>`;
+        html += `<div class="result-section"><h3>🛡️ Hunter Verification</h3>${kv(results.hunter_verification)}</div>`;
       }
       if (results.gravatar) {
         html += `<div class="result-section"><h3>👤 Gravatar</h3>${kv(results.gravatar)}</div>`;
       }
       if (results.emailrep) {
-        html += `<div class="result-section"><h3>⚠️ EmailRep</h3>${kv(results.emailrep)}</div>`;
+        html += `<div class="result-section"><h3>📊 EmailRep</h3>${kv(results.emailrep)}</div>`;
       }
       if (results.mx_records && results.mx_records.length) {
-        html += `<div class="result-section"><h3>📬 MX Records</h3><div class="list-compact">`;
-        results.mx_records.forEach((m) => { html += `<span class="item">${escapeHtml(m)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>📧 MX Records</h3><ul>${results.mx_records.map((m) => `<li>${escapeHtml(m)}</li>`).join('')}</ul></div>`;
       }
-      if (results.dehashed && Object.keys(results.dehashed).length) {
-        html += `<div class="result-section"><h3>🔑 Dehashed</h3>${kv(results.dehashed)}</div>`;
+      if (results.dehashed) {
+        html += `<div class="result-section"><h3>🔓 Dehashed</h3>${kv(results.dehashed)}</div>`;
       }
       if (results.social_profiles && results.social_profiles.length) {
-        html += `<div class="result-section"><h3>🌐 Social Profiles</h3><div class="list-compact">`;
-        results.social_profiles.forEach((p) => { html += `<span class="item">${escapeHtml(p)}</span>`; });
-        html += `</div></div>`;
-      }
-      if (results.social_media && results.social_media.length) {
-        html += `<div class="result-section"><h3>📱 Social Media</h3><div class="list-compact">`;
-        results.social_media.forEach((s) => { html += `<span class="item">${escapeHtml(s)}</span>`; });
-        html += `</div></div>`;
-      }
-      if (results.google_mentions && results.google_mentions.length) {
-        html += `<div class="result-section"><h3>🔍 Google Mentions</h3><div class="list-compact">`;
-        results.google_mentions.forEach((g) => { html += `<span class="item">${escapeHtml(g)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>🌐 Social Profiles</h3><ul>${results.social_profiles.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ul></div>`;
       }
     }
 
-    // Phone results
+    // ─── Username ───────────────────────────────────────────────
+    if (type === 'username') {
+      if (results.social_media && Object.keys(results.social_media).length) {
+        html += `<div class="result-section"><h3>🌍 Social Media</h3>${kv(results.social_media)}</div>`;
+      }
+      if (results.google_mentions && results.google_mentions.length) {
+        html += `<div class="result-section"><h3>🔍 Google Mentions</h3><ul>${results.google_mentions.map((g) => `<li>${escapeHtml(g)}</li>`).join('')}</ul></div>`;
+      }
+    }
+
+    // ─── Phone ──────────────────────────────────────────────────
     if (type === 'phone') {
       if (results.parsed) {
-        html += `<div class="result-section"><h3>🔢 Parsed Number</h3>${kv(results.parsed)}</div>`;
+        html += `<div class="result-section"><h3>📞 Parsed Number</h3>${kv(results.parsed)}</div>`;
       }
       if (results.country) {
         html += `<div class="result-section"><h3>🌍 Country</h3><p>${escapeHtml(results.country)}</p></div>`;
@@ -333,27 +310,17 @@
         html += `<div class="result-section"><h3>📡 Carrier</h3><p>${escapeHtml(results.carrier)}</p></div>`;
       }
       if (results.number_type) {
-        html += `<div class="result-section"><h3>📞 Number Type</h3><p>${escapeHtml(results.number_type)}</p></div>`;
+        html += `<div class="result-section"><h3>🏷️ Type</h3><p>${escapeHtml(results.number_type)}</p></div>`;
       }
       if (results.timezones && results.timezones.length) {
-        html += `<div class="result-section"><h3>🕐 Timezones</h3><div class="list-compact">`;
-        results.timezones.forEach((t) => { html += `<span class="item">${escapeHtml(t)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>🕐 Timezones</h3><ul>${results.timezones.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`;
       }
     }
 
-    // Domain results
+    // ─── Domain ─────────────────────────────────────────────────
     if (type === 'domain') {
       if (results.dns_records && Object.keys(results.dns_records).length) {
-        let dnsHtml = '';
-        Object.entries(results.dns_records).forEach(([key, vals]) => {
-          if (vals && vals.length) {
-            dnsHtml += `<tr><td><strong>${escapeHtml(key.toUpperCase())}</strong></td><td>${vals.map(v => escapeHtml(String(v))).join(', ')}</td></tr>`;
-          }
-        });
-        if (dnsHtml) {
-          html += `<div class="result-section"><h3>🌐 DNS Records</h3><table class="result-table">${dnsHtml}</table></div>`;
-        }
+        html += `<div class="result-section"><h3>🌐 DNS Records</h3>${kv(results.dns_records)}</div>`;
       }
       if (results.whois) {
         html += `<div class="result-section"><h3>📋 WHOIS</h3>${kv(results.whois)}</div>`;
@@ -361,101 +328,85 @@
       if (results.virustotal) {
         html += `<div class="result-section"><h3>🛡️ VirusTotal</h3>${kv(results.virustotal)}</div>`;
       }
-      if (results.security_headers) {
+      if (results.security_headers && Object.keys(results.security_headers).length) {
         html += `<div class="result-section"><h3>🔒 Security Headers</h3>${kv(results.security_headers)}</div>`;
       }
       if (results.technology && results.technology.length) {
-        html += `<div class="result-section"><h3>⚙️ Technology Stack</h3><div class="list-compact">`;
-        results.technology.forEach((t) => { html += `<span class="item">${escapeHtml(t)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>⚙️ Technology Stack</h3><ul>${results.technology.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`;
       }
       if (results.subdomains && results.subdomains.length) {
-        html += `<div class="result-section"><h3>🔗 Subdomains (${results.subdomains.length})</h3><div class="list-compact">`;
-        results.subdomains.forEach((s) => { html += `<span class="item">${escapeHtml(s)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>📂 Subdomains (${results.subdomains.length})</h3><ul>${results.subdomains.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ul></div>`;
       }
       if (results.open_ports && results.open_ports.length) {
-        html += `<div class="result-section"><h3>🔌 Open Ports</h3><div class="list-compact">`;
-        results.open_ports.forEach((p) => { html += `<span class="item">Port ${escapeHtml(String(p))}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>🔌 Open Ports</h3><ul>${results.open_ports.map((p) => `<li>Port ${escapeHtml(String(p))}</li>`).join('')}</ul></div>`;
       }
       if (results.wayback && results.wayback.length) {
-        html += `<div class="result-section"><h3>📜 Wayback Machine Snapshots</h3><div class="list-compact">`;
-        results.wayback.forEach((w) => {
-          html += `<span class="item"><a href="https://web.archive.org/web/${w.date}/${escapeHtml(w.url)}" target="_blank">${escapeHtml(w.date)} — ${escapeHtml(w.url)}</a></span>`;
-        });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>📜 Wayback Machine</h3><ul>${results.wayback.map((w) => `<li><a href="https://web.archive.org/web/${w.date}/${encodeURIComponent(w.url)}" target="_blank">${escapeHtml(w.date)} — ${escapeHtml(w.url)}</a></li>`).join('')}</ul></div>`;
       }
       if (results.zone_transfer && results.zone_transfer.length) {
-        html += `<div class="result-section"><h3>⚠️ Zone Transfer (Successful!)</h3><div class="list-compact">`;
-        results.zone_transfer.forEach((z) => { html += `<span class="item">${escapeHtml(z)}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>⚠️ Zone Transfer</h3><ul>${results.zone_transfer.map((z) => `<li>${escapeHtml(z)}</li>`).join('')}</ul></div>`;
       }
     }
 
-    // IP results
+    // ─── IP ─────────────────────────────────────────────────────
     if (type === 'ip') {
       if (results.hostname) {
-        html += `<div class="result-section"><h3>🏠 Hostname</h3><table class="result-table"><tr><td><strong>PTR</strong></td><td>${escapeHtml(results.hostname)}</td></tr></table></div>`;
+        html += `<div class="result-section"><h3>🏠 Hostname</h3><p>${escapeHtml(results.hostname)}</p></div>`;
       }
       if (results.geo) {
         html += `<div class="result-section"><h3>🌍 Geolocation</h3>${kv(results.geo)}</div>`;
       }
       if (results.reverse_dns && results.reverse_dns.length) {
-        html += `<div class="result-section"><h3>🔄 Reverse DNS</h3><div class="list-compact">`;
-        results.reverse_dns.forEach((r) => html += `<span class="item">${escapeHtml(r)}</span>`);
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>🔄 Reverse DNS</h3><ul>${results.reverse_dns.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`;
       }
       if (results.shodan) {
-        html += `<div class="result-section"><h3>⚡ Shodan</h3>${kv(results.shodan, 'org', 'isp', 'os', 'hostnames')}`;
+        let shodanHtml = kv(results.shodan, 'org', 'isp', 'os', 'hostnames');
         if (results.shodan.services) {
-          html += `<p><strong>Services:</strong></p><div class="list-compact">`;
+          shodanHtml += '<h4>Services:</h4><ul>';
           results.shodan.services.forEach((s) => {
-            html += `<span class="item">Port ${s.port} — ${escapeHtml(s.service || s.name || '?')}</span>`;
+            shodanHtml += `<li>Port ${s.port} — ${escapeHtml(s.service || s.name || '?')}</li>`;
           });
-          html += `</div>`;
+          shodanHtml += '</ul>';
         }
         if (results.shodan.vulns && results.shodan.vulns.length) {
-          html += `<p><strong>Vulnerabilities:</strong></p><div class="list-compact">`;
-          results.shodan.vulns.forEach((v) => { html += `<span class="item">${escapeHtml(v)}</span>`; });
-          html += `</div>`;
+          shodanHtml += '<h4>Vulnerabilities:</h4><ul>';
+          results.shodan.vulns.forEach((v) => {
+            shodanHtml += `<li>${escapeHtml(v)}</li>`;
+          });
+          shodanHtml += '</ul>';
         }
-        html += `</div>`;
+        html += `<div class="result-section"><h3>⚡ Shodan</h3>${shodanHtml}</div>`;
       }
       if (results.virustotal) {
         html += `<div class="result-section"><h3>🛡️ VirusTotal</h3>${kv(results.virustotal)}</div>`;
       }
       if (results.open_ports && results.open_ports.length) {
-        html += `<div class="result-section"><h3>🔌 Open Ports (${results.open_ports.length})</h3><div class="list-compact">`;
-        results.open_ports.forEach((p) => { html += `<span class="item">Port ${escapeHtml(String(p))}</span>`; });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>🔌 Open Ports (${results.open_ports.length})</h3><ul>${results.open_ports.map((p) => `<li>Port ${escapeHtml(String(p))}</li>`).join('')}</ul></div>`;
       }
       if (results.banners) {
-        html += `<div class="result-section"><h3>📡 Service Banners</h3><table class="result-table">`;
+        let bannerHtml = '';
         Object.entries(results.banners).forEach(([port, banner]) => {
-          html += `<tr><td><strong>Port ${escapeHtml(port)}</strong></td><td>${escapeHtml(banner)}</td></tr>`;
+          bannerHtml += `<p><strong>Port ${escapeHtml(port)}:</strong> ${escapeHtml(banner)}</p>`;
         });
-        html += `</table></div>`;
+        html += `<div class="result-section"><h3>📡 Service Banners</h3>${bannerHtml}</div>`;
       }
       if (results.rdap) {
         let rdapHtml = '';
-        if (results.rdap.handle) rdapHtml += `<tr><td><strong>Handle</strong></td><td>${escapeHtml(results.rdap.handle)}</td></tr>`;
-        if (results.rdap.name) rdapHtml += `<tr><td><strong>Org</strong></td><td>${escapeHtml(results.rdap.name)}</td></tr>`;
-        if (results.rdap.org_name) rdapHtml += `<tr><td><strong>Org Name</strong></td><td>${escapeHtml(results.rdap.org_name)}</td></tr>`;
-        if (results.rdap.country) rdapHtml += `<tr><td><strong>Country</strong></td><td>${escapeHtml(results.rdap.country)}</td></tr>`;
+        if (results.rdap.handle) rdapHtml += `<p><strong>Handle:</strong> ${escapeHtml(results.rdap.handle)}</p>`;
+        if (results.rdap.name) rdapHtml += `<p><strong>Org:</strong> ${escapeHtml(results.rdap.name)}</p>`;
+        if (results.rdap.org_name) rdapHtml += `<p><strong>Org Name:</strong> ${escapeHtml(results.rdap.org_name)}</p>`;
+        if (results.rdap.country) rdapHtml += `<p><strong>Country:</strong> ${escapeHtml(results.rdap.country)}</p>`;
         if (results.rdap.emails && results.rdap.emails.length) {
-          rdapHtml += `<tr><td><strong>Emails</strong></td><td>${results.rdap.emails.map(e => escapeHtml(e)).join(', ')}</td></tr>`;
+          rdapHtml += `<p><strong>Emails:</strong> ${results.rdap.emails.map((e) => escapeHtml(e)).join(', ')}</p>`;
         }
-        if (rdapHtml) {
-          html += `<div class="result-section"><h3>📋 RDAP</h3><table class="result-table">${rdapHtml}</table></div>`;
-        }
+        if (rdapHtml) html += `<div class="result-section"><h3>📋 RDAP</h3>${rdapHtml}</div>`;
       }
       if (results.abuse_score) {
-        html += `<div class="result-section"><h3>🚨 AbuseIPDB</h3><table class="result-table"><tr><td><strong>Confidence Score</strong></td><td>${escapeHtml(results.abuse_score)}</td></tr></table></div>`;
+        html += `<div class="result-section"><h3>🚨 AbuseIPDB</h3><p><strong>Confidence Score:</strong> ${escapeHtml(results.abuse_score)}</p></div>`;
       }
     }
 
-    // Fallback for any raw data not caught above
+    // ─── Fallback for any raw data keys ──────────────────────────
     const rawKeys = Object.keys(results).filter(
       (k) =>
         ![
@@ -473,16 +424,12 @@
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3>${kv(v)}</div>`;
       } else if (v && Array.isArray(v) && v.length) {
-        html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3><div class="list-compact">`;
-        v.forEach((item) => {
-          if (typeof item === 'string') html += `<span class="item">${escapeHtml(item)}</span>`;
-        });
-        html += `</div></div>`;
+        html += `<div class="result-section"><h3>📎 ${escapeHtml(k.replace(/_/g, ' '))}</h3><ul>${v.map((item) => typeof item === 'string' ? `<li>${escapeHtml(item)}</li>` : '').join('')}</ul></div>`;
       }
     });
 
     if (!html) {
-      html = '<div class="placeholder"><p>No intelligence data returned for this target.</p></div>';
+      html = '<div class="result-section"><p>No intelligence data returned for this target.</p></div>';
     }
 
     resultsArea.innerHTML = html;
